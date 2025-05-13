@@ -149,16 +149,16 @@ jobs:
             rm -rf graphrag_temp
           fi
 
-      - name: Install tools and dependencies
-        run: |
-          brew install llvm
-          rustup default nightly
+      # - name: Install tools and dependencies
+      #   run: |
+      #     brew install llvm
+      #     rustup default nightly
 
-          brew install tree
-          pip3 install --use-pep517 python-dotenv jinja2
-          go install golang.org/dl/go1.20.12@latest && go1.20.12 download
-          go env -w GOFLAGS="-buildvcs=false"
-          cargo install --force cbindgen
+      #     brew install tree
+      #     pip3 install --use-pep517 python-dotenv jinja2
+      #     go install golang.org/dl/go1.20.12@latest && go1.20.12 download
+      #     go env -w GOFLAGS="-buildvcs=false"
+      #     cargo install --force cbindgen
 
       - name: Login to DockerHub
         uses: docker/login-action@v2
