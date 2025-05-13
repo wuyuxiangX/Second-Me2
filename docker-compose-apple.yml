@@ -1,0 +1,65 @@
+services:
+  backend:
+    image: ${DOCKER_BACKEND_IMAGE:-wyxhhhh/second-me-backend-apple:latest}
+    container_name: second-me-backend
+    restart: unless-stopped
+    ports:
+      - "8002:8002"
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./run:/app/run
+      - ./resources:/app/resources
+      - ./docker:/app/docker
+      - ./.env:/app/.env
+      - llama-cpp-build:/app/llama.cpp/build # Persist the llama.cpp build
+    environment:
+      # Environment variables
+      - LOCAL_APP_PORT=8002
+      - IN_DOCKER_ENV=1
+      - PLATFORM=darwin
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    deploy:
+      resources:
+        limits:
+          # Set container memory limit to 16GB
+          memory: 16G
+        reservations:
+          # Memory reservation
+          memory: 4G
+    networks:
+      - second-me-network
+
+  frontend:
+    image: wyxhhhh/second-me-frontend:${DOCKER_TAG:-latest}
+    container_name: second-me-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./logs:/app/logs
+      - ./resources:/app/resources
+    environment:
+      - VITE_API_BASE_URL=http://backend:8002
+    depends_on:
+      - backend
+    deploy:
+      resources:
+        limits:
+          # Set container memory limit to 2GB
+          memory: 2G
+        reservations:
+          # Memory reservation
+          memory: 1G
+    networks:
+      - second-me-network
+
+networks:
+  second-me-network:
+    driver: bridge
+
+volumes:
+  llama-cpp-build:
+    driver: local

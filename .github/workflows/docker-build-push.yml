@@ -1,0 +1,288 @@
+name: Build and Push Docker Images
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      build_standard:
+        description: 'Build standard image'
+        type: boolean
+        default: true
+      build_apple:
+        description: 'Build Apple Silicon image'
+        type: boolean
+        default: true
+      docker_tag:
+        description: 'Docker tag (default: latest)'
+        default: 'latest'
+
+jobs:
+  build-standard:
+    if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.build_standard == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free Disk Space
+        run: |
+          echo "Before cleanup disk space:"
+          df -h
+          
+          # 清理不需要的软件包和缓存
+          sudo apt-get clean
+          sudo apt-get autoclean
+          sudo apt-get autoremove -y
+          sudo rm -rf /var/lib/apt/lists/*
+          
+          # 清理Docker缓存
+          docker system prune -af --volumes
+          
+          # 移除一些不需要的大型目录
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/local/lib/node_modules
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache
+          
+          # 清理其他不需要的大文件
+          sudo find /var -type d -name "*.cache" -exec rm -rf {} +
+          sudo find /usr/share -type d -name "doc" -o -name "docs" -o -name "man" -exec rm -rf {} +
+          
+          # 清理NVIDIA/CUDA相关文件（解决构建中提到的错误）
+          sudo rm -rf /usr/local/cuda* || true
+          sudo rm -rf /usr/local/lib/python*/site-packages/nvidia || true
+          sudo rm -rf /usr/local/lib/python*/site-packages/torch/lib/*.so || true
+          sudo rm -rf /usr/local/lib/python*/site-packages/torch/cuda || true
+          
+          echo "After cleanup disk space:"
+          df -h
+
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # 获取完整的历史记录，以便正确标记
+
+      - name: Prepare dependencies
+        run: |
+          # 确保依赖目录存在
+          mkdir -p dependencies
+          
+          # 检查llama.cpp.zip是否存在，不存在则下载最新版本
+          if [ ! -f "dependencies/llama.cpp.zip" ]; then
+            echo "Downloading llama.cpp..."
+            wget -q -O dependencies/llama.cpp.zip https://github.com/ggerganov/llama.cpp/archive/refs/heads/master.zip
+          fi
+          
+          # 检查graphrag包是否存在，不存在则准备一个空包
+          if [ ! -f "dependencies/graphrag-1.2.1.dev27.tar.gz" ]; then
+            echo "Creating placeholder graphrag package..."
+            mkdir -p graphrag_temp/graphrag
+            echo "# Empty package" > graphrag_temp/graphrag/__init__.py
+            echo 'from setuptools import setup, find_packages; setup(name="graphrag", version="1.2.1.dev27", packages=find_packages())' > graphrag_temp/setup.py
+            cd graphrag_temp && python setup.py sdist --dist-dir=.. && cd ..
+            mv graphrag-1.2.1.dev27.tar.gz dependencies/
+            rm -rf graphrag_temp
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: wyxhhhh/second-me-backend
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=raw,value=${{ github.event.inputs.docker_tag || 'latest' }}
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./Dockerfile.backend
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          outputs: type=registry,compression=gzip,compression-level=9
+          build-args: |
+            PIP_NO_CACHE_DIR=1
+            DEBIAN_FRONTEND=noninteractive
+
+
+
+  build-apple:
+    if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.build_apple == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free Disk Space
+        run: |
+          echo "Before cleanup disk space:"
+          df -h
+          
+          # 清理不需要的软件包和缓存
+          sudo apt-get clean
+          sudo apt-get autoclean
+          sudo apt-get autoremove -y
+          sudo rm -rf /var/lib/apt/lists/*
+          
+          # 清理Docker缓存
+          docker system prune -af --volumes
+          
+          # 移除一些不需要的大型目录
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/local/lib/node_modules
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache
+          
+          # 清理其他不需要的大文件
+          sudo find /var -type d -name "*.cache" -exec rm -rf {} +
+          sudo find /usr/share -type d -name "doc" -o -name "docs" -o -name "man" -exec rm -rf {} +
+          
+          echo "After cleanup disk space:"
+          df -h
+          
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # 获取完整的历史记录，以便正确标记
+
+      - name: Prepare dependencies
+        run: |
+          # 确保依赖目录存在
+          mkdir -p dependencies
+          
+          # 检查llama.cpp.zip是否存在，不存在则下载最新版本
+          if [ ! -f "dependencies/llama.cpp.zip" ]; then
+            echo "Downloading llama.cpp..."
+            wget -q -O dependencies/llama.cpp.zip https://github.com/ggerganov/llama.cpp/archive/refs/heads/master.zip
+          fi
+          
+          # 检查graphrag包是否存在，不存在则准备一个空包
+          if [ ! -f "dependencies/graphrag-1.2.1.dev27.tar.gz" ]; then
+            echo "Creating placeholder graphrag package..."
+            mkdir -p graphrag_temp/graphrag
+            echo "# Empty package" > graphrag_temp/graphrag/__init__.py
+            echo 'from setuptools import setup, find_packages; setup(name="graphrag", version="1.2.1.dev27", packages=find_packages())' > graphrag_temp/setup.py
+            cd graphrag_temp && python setup.py sdist --dist-dir=.. && cd ..
+            mv graphrag-1.2.1.dev27.tar.gz dependencies/
+            rm -rf graphrag_temp
+          fi
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+        with:
+          platforms: 'arm64'
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: wyxhhhh/second-me-backend-apple
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=raw,value=${{ github.event.inputs.docker_tag || 'latest' }}
+
+      - name: Build and push Apple Silicon backend image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./Dockerfile.backend.apple
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          outputs: type=registry,compression=gzip,compression-level=9
+          build-args: |
+            PIP_NO_CACHE_DIR=1
+            DEBIAN_FRONTEND=noninteractive
+
+  build-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free Disk Space
+        run: |
+          echo "Before cleanup disk space:"
+          df -h
+          
+          # 清理不需要的软件包和缓存
+          sudo apt-get clean
+          sudo apt-get autoclean
+          sudo apt-get autoremove -y
+          sudo rm -rf /var/lib/apt/lists/*
+          
+          # 清理Docker缓存
+          docker system prune -af --volumes
+          
+          # 移除一些不需要的大型目录
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/local/lib/node_modules
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache
+          
+          # 清理其他不需要的大文件
+          sudo find /var -type d -name "*.cache" -exec rm -rf {} +
+          
+          echo "After cleanup disk space:"
+          df -h
+          
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # 获取完整的历史记录，以便正确标记
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: wyxhhhh/second-me-frontend
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=raw,value=${{ github.event.inputs.docker_tag || 'latest' }}
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./Dockerfile.frontend
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          outputs: type=registry,compression=gzip,compression-level=9
+          build-args: |
+            NODE_ENV=production
