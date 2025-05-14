@@ -114,20 +114,21 @@ jobs:
 
   build-apple:
     if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.build_apple == 'true' }}
-    runs-on: macos-latest-xlarge
+    runs-on: ubuntu-latest
     steps:
       - name: Free Disk Space
         run: |
           echo "Before cleanup disk space:"
           df -h
 
-          # 清理不需要的缓存
-          brew cleanup
+          # 清理不需要的软件包和缓存
+          sudo apt-get clean
+          sudo apt-get autoclean
+          sudo apt-get autoremove -y
+          sudo rm -rf /lib/apt/lists/*
 
           # 清理Docker缓存
-          if command -v docker &> /dev/null; then
-            docker system prune -af --volumes
-          fi
+          docker system prune -af --volumes
 
       - name: Checkout code
         uses: actions/checkout@v3
@@ -156,58 +157,53 @@ jobs:
             rm -rf graphrag_temp
           fi
 
-      # 安装和设置 Docker
-      - name: Setup Docker
-        uses: docker-practice/actions-setup-docker@master
-        timeout-minutes: 12
+      # 设置QEMU以支持ARM架构
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+        with:
+          platforms: "linux/arm64,linux/amd64,linux/arm64/v8"
 
+      # 设置 Docker Buildx
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      # 登录 Docker Hub
       - name: Login to DockerHub
-        run: |
-          echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Setup Docker Buildx
-        run: |
-          docker buildx create --name mybuilder --driver docker-container --use
-          docker buildx inspect --bootstrap
+      # 设置镜像元数据
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: wyxhhhh/second-me-backend-apple
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=raw,value=${{ github.event.inputs.docker_tag || 'latest' }}
 
-      # 提取版本信息和 tag
-      - name: Set Tag Variables
-        id: tag_vars
-        run: |
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            VERSION=${GITHUB_REF#refs/tags/}
-            echo "tags=wyxhhhh/second-me-backend-apple:${VERSION},wyxhhhh/second-me-backend-apple:latest" >> $GITHUB_OUTPUT
-          elif [[ "${GITHUB_REF}" == refs/heads/main ]]; then
-            echo "tags=wyxhhhh/second-me-backend-apple:latest" >> $GITHUB_OUTPUT
-          else
-            REF=$(echo ${GITHUB_REF#refs/heads/} | sed -e 's/\//-/g')
-            echo "tags=wyxhhhh/second-me-backend-apple:${REF}" >> $GITHUB_OUTPUT
-          fi
-
-          if [ -n "${{ github.event.inputs.docker_tag }}" ]; then
-            echo "tags=wyxhhhh/second-me-backend-apple:${{ github.event.inputs.docker_tag }}" >> $GITHUB_OUTPUT
-          fi
-
-      # 直接构建和推送 Apple Silicon 镜像
-      - name: Build and Push Apple Silicon image
-        run: |
-          echo "Building for Apple Silicon (arm64)..."
-          # 显示一些诊断信息
-          echo "系统架构: $(uname -m)"
-          echo "Docker info:"
-          docker info
-          echo "Docker buildx builders:"
-          docker buildx ls
-          
-          # 直接构建和推送
-          docker buildx build \
-            --platform linux/arm64 \
-            --file ./Dockerfile.backend.apple \
-            --tag ${{ steps.tag_vars.outputs.tags }} \
-            --push \
-            --build-arg PIP_NO_CACHE_DIR=1 \
-            --build-arg DEBIAN_FRONTEND=noninteractive \
-            .
+      # 构建并推送 Apple Silicon 镜像
+      - name: Build and push Apple Silicon image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./Dockerfile.backend.apple
+          platforms: linux/arm64,linux/amd64,linux/arm64/v8
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # 启用缓存
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # 压缩设置
+          outputs: type=registry,compression=gzip,compression-level=9
+          # 构建参数
+          build-args: |
+            PIP_NO_CACHE_DIR=1
+            DEBIAN_FRONTEND=noninteractive
 
   # build-frontend:
   #   runs-on: ubuntu-latest
