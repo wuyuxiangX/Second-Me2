@@ -114,7 +114,7 @@ jobs:
 
   build-apple:
     if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.build_apple == 'true' }}
-    runs-on: macos-latest
+    runs-on: macos-latest-xlarge
     steps:
       - name: Free Disk Space
         run: |
@@ -156,21 +156,10 @@ jobs:
             rm -rf graphrag_temp
           fi
 
-      # 安装 Docker
-      - name: Install Docker
-        run: |
-          echo "Installing Docker for macOS..."
-          # 安装 Docker 命令行工具
-          brew install docker
-          brew install colima
-          brew install docker-buildx
-
-          # 启动 Colima (轻量级 Docker 环境)
-          colima start --cpu 4 --memory 12 --disk 100 --arch aarch64
-
-          # 检查 Docker 是否正常运行
-          docker version
-          docker buildx version
+      # 安装和设置 Docker
+      - name: Setup Docker
+        uses: docker-practice/actions-setup-docker@master
+        timeout-minutes: 12
 
       - name: Login to DockerHub
         run: |
@@ -187,22 +176,30 @@ jobs:
         run: |
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             VERSION=${GITHUB_REF#refs/tags/}
-            echo "::set-output name=tags::wyxhhhh/second-me-backend-apple:${VERSION},wyxhhhh/second-me-backend-apple:latest"
+            echo "tags=wyxhhhh/second-me-backend-apple:${VERSION},wyxhhhh/second-me-backend-apple:latest" >> $GITHUB_OUTPUT
           elif [[ "${GITHUB_REF}" == refs/heads/main ]]; then
-            echo "::set-output name=tags::wyxhhhh/second-me-backend-apple:latest"
+            echo "tags=wyxhhhh/second-me-backend-apple:latest" >> $GITHUB_OUTPUT
           else
             REF=$(echo ${GITHUB_REF#refs/heads/} | sed -e 's/\//-/g')
-            echo "::set-output name=tags::wyxhhhh/second-me-backend-apple:${REF}"
+            echo "tags=wyxhhhh/second-me-backend-apple:${REF}" >> $GITHUB_OUTPUT
           fi
 
           if [ -n "${{ github.event.inputs.docker_tag }}" ]; then
-            echo "::set-output name=tags::wyxhhhh/second-me-backend-apple:${{ github.event.inputs.docker_tag }}"
+            echo "tags=wyxhhhh/second-me-backend-apple:${{ github.event.inputs.docker_tag }}" >> $GITHUB_OUTPUT
           fi
 
       # 直接构建和推送 Apple Silicon 镜像
       - name: Build and Push Apple Silicon image
         run: |
           echo "Building for Apple Silicon (arm64)..."
+          # 显示一些诊断信息
+          echo "系统架构: $(uname -m)"
+          echo "Docker info:"
+          docker info
+          echo "Docker buildx builders:"
+          docker buildx ls
+          
+          # 直接构建和推送
           docker buildx build \
             --platform linux/arm64 \
             --file ./Dockerfile.backend.apple \
